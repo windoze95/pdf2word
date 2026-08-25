@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF to Confluence-ready Word</title>
+<style>
+  /* ------------------------------------------------------------------
+     Prepress bench. The subject is preparing documents for output, so the
+     vocabulary is registration marks, trim edges and proof readouts -- and
+     the accent is process magenta, the ink registration marks are actually
+     printed in. Roles are named rather than coloured, so a future palette
+     change touches these nine lines and nothing else.
+     ------------------------------------------------------------------ */
+  :root {
+    --ground:     #f8f4fa;  /* page */
+    --surface:    #ffffff;  /* raised surface */
+    --edge:       #e6dbec;  /* rules and trim */
+    --ink:        #1a1320;  /* type */
+    --faded:      #6d6076;  /* secondary type */
+    --accent:     #b0006b;  /* fills */
+    --accent-ink: #99005e;  /* marks and text at contrast */
+    --on-accent:  #ffffff;  /* type on a filled accent */
+    --ok:         #2f7a4f;  /* cleared */
+    --bad:        #b3123c;  /* failed */
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+            "DejaVu Sans Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:     #171020;
+      --surface:    #201829;
+      --edge:       #382b44;
+      --ink:        #f1eaf4;
+      --faded:      #a496ad;
+      --accent:     #d6006e;
+      --accent-ink: #ff4da6;
+      --on-accent:  #ffffff;
+      --ok:         #4fbe84;
+      --bad:        #ff6b8a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 52px 24px 72px;
+    background: var(--ground);
+    color: var(--ink);
+    font: 15px/1.6 var(--sans);
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Small caps-and-tracking labels do the signposting throughout. */
+  .badge, .tabs button, .status, .meta, .modes button, .engine > span,
+  #drop .small, .paste-name > span, footer {
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .13em;
+    font-size: 11px;
+  }
+
+  header { margin-bottom: 30px; }
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(26px, 5.2vw, 38px);
+    font-weight: 700;
+    letter-spacing: -.035em;
+    line-height: 1.05;
+    margin: 0 0 12px;
+  }
+  h1 em { font-style: normal; color: var(--accent-ink); }
+  .sub { color: var(--faded); margin: 0; max-width: 54ch; font-size: 14.5px; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 9px;
+    margin-top: 18px; color: var(--accent-ink);
+  }
+  .badge .dot { width: 6px; height: 6px; background: var(--accent); }
+  .badge.warn { color: var(--bad); }
+  .badge.warn .dot { background: var(--bad); }
+
+  /* The intake bay. Corner registration brackets, borrowed from platemaking,
+     extend when a file is over the target -- the one flourish in the page. */
+  #drop {
+    --mark: 15px;
+    position: relative;
+    margin: 20px 0 18px;
+    padding: 54px 24px;
+    background-color: var(--surface);
+    border: 1px solid var(--edge);
+    text-align: center;
+    cursor: pointer;
+    background-repeat: no-repeat;
+    background-image:
+      linear-gradient(var(--accent-ink), var(--accent-ink)), linear-gradient(var(--accent-ink), var(--accent-ink)),
+      linear-gradient(var(--accent-ink), var(--accent-ink)), linear-gradient(var(--accent-ink), var(--accent-ink)),
+      linear-gradient(var(--accent-ink), var(--accent-ink)), linear-gradient(var(--accent-ink), var(--accent-ink)),
+      linear-gradient(var(--accent-ink), var(--accent-ink)), linear-gradient(var(--accent-ink), var(--accent-ink));
+    background-size:
+      var(--mark) 2px, 2px var(--mark), var(--mark) 2px, 2px var(--mark),
+      var(--mark) 2px, 2px var(--mark), var(--mark) 2px, 2px var(--mark);
+    background-position:
+      left 13px top 13px, left 13px top 13px,
+      right 13px top 13px, right 13px top 13px,
+      left 13px bottom 13px, left 13px bottom 13px,
+      right 13px bottom 13px, right 13px bottom 13px;
+    transition: background-size .18s ease, background-color .18s ease;
+  }
+  #drop:hover { --mark: 22px; }
+  #drop.over {
+    --mark: 34px;
+    background-color: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  }
+  #drop .big { font-size: 17px; font-weight: 600; margin-bottom: 7px; letter-spacing: -.01em; }
+  #drop .small { color: var(--faded); }
+  #drop svg { width: 26px; height: 26px; color: var(--accent-ink); margin-bottom: 14px; }
+
+  .controls {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 8px;
+  }
+  .modes { display: inline-flex; border: 1px solid var(--edge); }
+  /* An author display rule beats the hidden attribute's UA style, so anything
+     toggled with .hidden needs this said explicitly. */
+  .modes[hidden] { display: none; }
+  .modes button {
+    border: 0; background: none; color: var(--faded);
+    padding: 9px 15px; cursor: pointer;
+  }
+  .modes button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+  .hint { color: var(--faded); font-size: 13px; }
+
+  .engine { display: inline-flex; align-items: center; gap: 10px; color: var(--faded); }
+  .engine select {
+    font-family: var(--sans); font-size: 13.5px; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--edge);
+    padding: 8px 10px; max-width: 270px; text-transform: none; letter-spacing: 0;
+  }
+  .engine[hidden] { display: none; }
+
+  .tabs { display: flex; margin: 26px 0 0; border-bottom: 1px solid var(--edge); }
+  .tabs button {
+    border: 0; border-bottom: 2px solid transparent; background: none; color: var(--faded);
+    padding: 11px 16px 9px; cursor: pointer; margin-bottom: -1px;
+  }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent-ink); }
+
+  .paste-name { display: flex; align-items: center; gap: 12px; margin: 20px 0 10px; color: var(--faded); }
+  .paste-name input {
+    flex: 1; font-family: var(--sans); font-size: 14px; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--edge); padding: 9px 11px;
+  }
+
+  #canvas {
+    position: relative;
+    min-height: 220px; max-height: 460px; overflow: auto;
+    background: var(--surface); border: 1px solid var(--edge);
+    padding: 18px 20px; color: var(--ink); font-size: 14px; line-height: 1.55;
+  }
+  #canvas:focus { outline: none; border-color: var(--accent); }
+  #canvas:empty::before {
+    content: attr(data-placeholder); color: var(--faded); pointer-events: none;
+  }
+  /* Pasted markup carries the source app's own colours, widths and — in
+     OneNote's case — absolute positioning, which would otherwise let content
+     escape this box entirely. Flatten all of it back into normal flow. */
+  #canvas * {
+    max-width: 100% !important;
+    color: inherit !important;
+    background: none !important;
+    position: static !important;
+    float: none !important;
+    left: auto !important; top: auto !important; right: auto !important; bottom: auto !important;
+    width: auto !important; height: auto !important;
+    margin-top: 0 !important; margin-bottom: 0 !important;
+  }
+  #canvas img { height: auto !important; border-radius: 4px; margin: 6px 0; display: block; }
+  /* An image the clipboard couldn't carry: show it as an obvious gap to fill,
+     never as a silently broken icon. */
+  #canvas img[data-unresolved] {
+    display: block; min-width: 260px; min-height: 62px;
+    border: 1px dashed var(--bad) !important; border-radius: 8px;
+    padding: 20px 14px; color: var(--bad) !important; font-size: 12.5px;
+  }
+  #canvas table { border-collapse: collapse; }
+  #canvas td, #canvas th { border: 1px solid var(--edge); padding: 4px 8px; }
+  #canvas a { color: var(--accent-ink) !important; }
+  #canvas img[data-unresolved] { border-color: var(--bad) !important; color: var(--bad) !important; }
+
+  .paste-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+  #paste-warn { color: var(--bad); margin: 10px 0 0; }
+  .btn[disabled] { opacity: .4; cursor: not-allowed; }
+
+  /* The queue is a proof log: what went through, and the measurements of
+     what came out. */
+  #list { display: flex; flex-direction: column; margin-top: 22px; }
+  #list:empty::before {
+    content: "Converted files land here.";
+    display: block; padding: 18px 0; color: var(--faded);
+    font-family: var(--mono); text-transform: uppercase; letter-spacing: .13em; font-size: 11px;
+    border-top: 1px solid var(--edge);
+  }
+  .row { border-top: 1px solid var(--edge); padding: 16px 0 18px; }
+  .row:last-of-type { border-bottom: 1px solid var(--edge); }
+  .row-top { display: flex; align-items: baseline; gap: 14px; }
+  .name {
+    font-weight: 600; flex: 1; min-width: 0; letter-spacing: -.01em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .status { color: var(--faded); white-space: nowrap; }
+  .row.done .status { color: var(--ok); }
+  .row.error .status { color: var(--bad); }
+
+  .bar { height: 3px; background: var(--edge); margin-top: 13px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .35s ease; }
+  .row.done .bar, .row.error .bar { display: none; }
+
+  .meta {
+    margin-top: 11px; color: var(--faded);
+    text-transform: none; letter-spacing: .01em; font-size: 12px; line-height: 1.7;
+  }
+  .err-text { margin-top: 10px; color: var(--bad); font-size: 13px; }
+
+  a.btn, button.btn {
+    display: inline-block; border: 1px solid var(--accent); cursor: pointer;
+    background: var(--accent); color: var(--on-accent); text-decoration: none;
+    padding: 9px 16px; font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .13em; font-weight: 600;
+  }
+  a.btn:hover, button.btn:hover { background: color-mix(in srgb, var(--accent) 82%, #000); }
+  a.btn.ghost, button.btn.ghost {
+    background: transparent; color: var(--ink); border-color: var(--edge);
+  }
+  a.btn.ghost:hover, button.btn.ghost:hover { background: transparent; border-color: var(--accent); }
+  #all { margin-top: 20px; display: none; }
+  footer { margin-top: 34px; color: var(--faded); line-height: 2; }
+  code {
+    font-family: var(--mono); text-transform: none; letter-spacing: 0;
+    background: var(--surface); border: 1px solid var(--edge); padding: 2px 6px; font-size: 11px;
+  }
+
+  #offline {
+    border: 1px solid var(--bad); border-left-width: 3px;
+    padding: 14px 16px; margin-bottom: 26px; font-size: 14px; line-height: 1.6;
+  }
+  #offline strong { display: block; margin-bottom: 3px; color: var(--bad); }
+  #offline a { color: var(--accent-ink); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+  @media (max-width: 560px) {
+    body { padding: 34px 18px 56px; }
+    .controls { align-items: flex-start; flex-direction: column; gap: 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="offline" hidden>
+    <strong>This page is open as a file, so it can't reach the converter.</strong>
+    Open <a id="offline-link" href="http://127.0.0.1:8756/">http://127.0.0.1:8756/</a> instead —
+    that's the address <code>run.sh</code> prints when it starts.
+  </div>
+
+  <header>
+    <h1>Documents in.<br><em>Clean Word out.</em></h1>
+    <p class="sub">Rebuilds a PDF or a pasted OneNote page as real headings, lists, tables and inline images — the only things Confluence's Word importer knows how to read.</p>
+    <div class="badge" id="badge"><span class="dot"></span><span id="badge-text">Checking…</span></div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button id="tab-pdf" role="tab" aria-selected="true">PDF files</button>
+    <button id="tab-paste" role="tab" aria-selected="false">Paste from OneNote</button>
+  </div>
+
+
+  <div id="pane-pdf">
+    <div id="drop" tabindex="0" role="button" aria-label="Choose PDFs to convert">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
+      </svg>
+      <div class="big">Drop PDFs to convert</div>
+      <div class="small">or choose files — several at once is fine</div>
+    </div>
+    <input type="file" id="picker" accept="application/pdf,.pdf" multiple hidden>
+  </div>
+
+  <div id="pane-paste" hidden>
+    <label class="paste-name">
+      <span>Title</span>
+      <input type="text" id="paste-title" placeholder="Pasted note" spellcheck="false">
+    </label>
+    <div id="canvas" contenteditable="true" spellcheck="false"
+         aria-label="Paste OneNote content here"
+         data-placeholder="Select a page in OneNote, copy it, and paste here (Ctrl+V)."></div>
+    <div class="paste-bar">
+      <span class="hint" id="paste-stats">Nothing pasted yet.</span>
+      <span>
+        <button class="btn ghost" id="paste-clear" type="button">Clear</button>
+        <button class="btn" id="paste-go" type="button" disabled>Convert to Word</button>
+      </span>
+    </div>
+    <p class="hint" id="paste-warn" hidden></p>
+  </div>
+
+  <div class="controls">
+    <div class="modes" role="group" aria-label="Conversion mode">
+      <button id="m-auto" aria-pressed="true">Accurate</button>
+      <button id="m-fast" aria-pressed="false">Fast</button>
+    </div>
+    <label class="engine" id="engine-wrap">
+      <span>Engine</span>
+      <select id="engine"></select>
+    </label>
+  </div>
+  <p class="hint" id="mode-hint" style="margin: -8px 0 22px;">Reads every page and rebuilds the structure.</p>
+
+  <div id="list"></div>
+  <button class="btn ghost" id="all">Download all as .zip</button>
+
+  <footer>
+    Files are also saved to <code id="outdir">…</code> · Everything runs on this machine.
+  </footer>
+</div>
+
+<script>
+const listEl = document.getElementById('list');
+const dropEl = document.getElementById('drop');
+const pickerEl = document.getElementById('picker');
+const allBtn = document.getElementById('all');
+const hintEl = document.getElementById('mode-hint');
+const engineEl = document.getElementById('engine');
+const engineWrap = document.getElementById('engine-wrap');
+let mode = 'auto';
+let aiAvailable = true;
+let engines = [];
+const jobs = new Map();
+
+// Opened straight off disk, every /api call has no origin to resolve against
+// and fetch fails with an unhelpful parse error. Say so plainly instead.
+const servedOverHttp = location.protocol === 'http:' || location.protocol === 'https:';
+if (!servedOverHttp) {
+  const banner = document.getElementById('offline');
+  banner.hidden = false;
+  const port = 8756;
+  banner.querySelector('#offline-link').href = `http://127.0.0.1:${port}/`;
+  document.querySelectorAll('button, select, input, #drop, #canvas')
+    .forEach(el => { el.setAttribute('disabled', ''); el.style.pointerEvents = 'none'; el.style.opacity = '.5'; });
+}
+
+if (servedOverHttp) fetch('/api/config').then(r => r.json()).then(cfg => {
+  const badge = document.getElementById('badge');
+  engines = cfg.backends || [];
+  aiAvailable = cfg.ai_available;
+
+  if (!aiAvailable) {
+    document.getElementById('badge-text').textContent = 'No AI engine found — Fast mode only';
+    badge.classList.add('warn');
+    badge.title = 'Set OPENAI_API_KEY or ANTHROPIC_API_KEY, or install Claude Code.';
+    engineWrap.hidden = true;
+    setMode('fast');
+  } else {
+    const names = engines.map(e => e.label.replace(/\s*\(.*\)$/, ''));
+    document.getElementById('badge-text').textContent =
+      engines.length > 1 ? `${new Set(names).size} engines available` : engines[0].label;
+    badge.title = engines.map(e => `${e.label} — ${e.detail}`).join('\n');
+    engines.forEach(e => {
+      const opt = document.createElement('option');
+      opt.value = e.id;
+      opt.textContent = e.label;
+      opt.title = e.detail;
+      engineEl.appendChild(opt);
+    });
+    engineEl.value = cfg.default_backend;
+    engineWrap.hidden = engines.length < 2;
+  }
+  document.getElementById('outdir').textContent = cfg.output_dir;
+});
+
+function setMode(next) {
+  if (next === 'auto' && !aiAvailable) return;
+  mode = next;
+  document.getElementById('m-auto').setAttribute('aria-pressed', String(next === 'auto'));
+  document.getElementById('m-fast').setAttribute('aria-pressed', String(next === 'fast'));
+  engineWrap.hidden = next === 'fast' || engines.length < 2;
+  document.querySelector('.modes').hidden =
+    !document.getElementById('pane-pdf') || document.getElementById('pane-pdf').hidden;
+  hintEl.textContent = next === 'auto'
+    ? 'Reads every page and rebuilds the structure.'
+    : 'Layout heuristics only — instant, no model call, rougher on complex pages.';
+}
+document.getElementById('m-auto').onclick = () => setMode('auto');
+document.getElementById('m-fast').onclick = () => setMode('fast');
+
+dropEl.onclick = () => pickerEl.click();
+dropEl.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickerEl.click(); } };
+pickerEl.onchange = () => { addFiles([...pickerEl.files]); pickerEl.value = ''; };
+
+['dragenter', 'dragover'].forEach(evt =>
+  document.addEventListener(evt, e => { e.preventDefault(); dropEl.classList.add('over'); }));
+['dragleave', 'drop'].forEach(evt =>
+  document.addEventListener(evt, e => {
+    e.preventDefault();
+    if (evt === 'drop' || e.relatedTarget === null) dropEl.classList.remove('over');
+  }));
+document.addEventListener('drop', e => {
+  const files = [...(e.dataTransfer?.files || [])].filter(f =>
+    f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+  if (files.length) addFiles(files);
+});
+
+function addFiles(files) { files.forEach(startFile); }
+
+function rowFor(key, name) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `
+    <div class="row-top">
+      <span class="name"></span>
+      <span class="status">Uploading…</span>
+    </div>
+    <div class="bar"><i></i></div>
+    <div class="meta" hidden></div>`;
+  row.querySelector('.name').textContent = name;
+  listEl.appendChild(row);
+  return row;
+}
+
+async function startFile(file) {
+  const row = rowFor(file.name, file.name);
+  try {
+    // Choosing Accurate means "use the model": if the engine can't run, say so
+    // rather than quietly handing back the rougher Fast conversion.
+    const wireMode = mode === 'auto' ? 'ai' : 'fast';
+    const engine = (wireMode === 'ai' && engineEl.value) ? `&backend=${engineEl.value}` : '';
+    const res = await fetch(`/api/convert?name=${encodeURIComponent(file.name)}&mode=${wireMode}${engine}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/pdf' },
+      body: file,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    jobs.set(data.job_id, { row, name: file.name, done: false });
+    poll(data.job_id);
+  } catch (err) {
+    fail(row, err.message);
+  }
+}
+
+function fail(row, message) {
+  row.classList.add('error');
+  row.querySelector('.status').textContent = 'Failed';
+  const meta = row.querySelector('.meta');
+  meta.hidden = false;
+  meta.className = 'err-text';
+  meta.textContent = message;
+}
+
+async function poll(id) {
+  const entry = jobs.get(id);
+  if (!entry) return;
+  try {
+    const job = await (await fetch(`/api/job?id=${id}`)).json();
+    const { row } = entry;
+    row.querySelector('.bar > i').style.width = `${Math.round((job.progress || 0) * 100)}%`;
+
+    if (job.state === 'done') {
+      entry.done = true;
+      row.classList.add('done');
+      row.querySelector('.status').textContent = 'Ready';
+      const s = job.stats || {};
+      const meta = row.querySelector('.meta');
+      meta.hidden = false;
+      meta.textContent =
+        `${job.pages} pages · ${s.headings || 0} headings · ${s.list_items || 0} list items · ` +
+        `${s.tables || 0} tables · ${s.images || 0} images · ${s.links || 0} links · ${job.engine}`;
+      (job.warnings || []).forEach(text => {
+        const warn = document.createElement('div');
+        warn.className = 'err-text';
+        warn.textContent = text;
+        row.appendChild(warn);
+      });
+      const link = document.createElement('a');
+      link.className = 'btn';
+      link.href = `/api/download?id=${id}`;
+      link.textContent = 'Download .docx';
+      link.style.marginTop = '11px';
+      link.style.display = 'inline-block';
+      row.appendChild(link);
+      refreshAll();
+    } else if (job.state === 'error') {
+      fail(row, job.message || 'Conversion failed');
+    } else {
+      row.querySelector('.status').textContent = job.message || 'Working…';
+      setTimeout(() => poll(id), 900);
+    }
+  } catch {
+    setTimeout(() => poll(id), 1800);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Paste canvas
+// ---------------------------------------------------------------------------
+const canvasEl = document.getElementById('canvas');
+const pasteStats = document.getElementById('paste-stats');
+const pasteWarn = document.getElementById('paste-warn');
+const pasteGo = document.getElementById('paste-go');
+const pasteTitle = document.getElementById('paste-title');
+
+function showTab(which) {
+  const isPdf = which === 'pdf';
+  document.getElementById('tab-pdf').setAttribute('aria-selected', String(isPdf));
+  document.getElementById('tab-paste').setAttribute('aria-selected', String(!isPdf));
+  document.getElementById('pane-pdf').hidden = !isPdf;
+  document.getElementById('pane-paste').hidden = isPdf;
+
+  // Fast mode reads PDF typography, so it cannot apply to a paste. Hide the
+  // control there rather than leaving a switch on screen that does nothing.
+  document.querySelector('.modes').hidden = !isPdf;
+  if (isPdf) {
+    setMode(mode);
+  } else {
+    engineWrap.hidden = engines.length < 2;
+    hintEl.textContent = 'Pasted notes always use Accurate — Fast mode reads PDF typography.';
+  }
+}
+document.getElementById('tab-pdf').onclick = () => showTab('pdf');
+document.getElementById('tab-paste').onclick = () => { showTab('paste'); canvasEl.focus(); };
+
+const readAsDataURL = file => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
+// Office apps put images on the clipboard as local file:// references that the
+// browser refuses to load, but they also hand over the actual bytes as File
+// objects. Pairing the two in document order is what rescues the screenshots.
+canvasEl.addEventListener('paste', async event => {
+  const data = event.clipboardData;
+  if (!data) return;
+
+  const html = data.getData('text/html');
+  const plain = data.getData('text/plain');
+  if (!html && !plain) return;
+
+  event.preventDefault();
+
+  const files = [...(data.files || [])].filter(f => f.type.startsWith('image/'));
+  const loose = [...(data.items || [])]
+    .filter(i => i.kind === 'file' && i.type.startsWith('image/'))
+    .map(i => i.getAsFile())
+    .filter(Boolean);
+  const pool = files.length ? files : loose;
+
+  let fragment;
+  if (html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('script, style, meta, link').forEach(n => n.remove());
+
+    const imgs = [...doc.querySelectorAll('img')];
+    let taken = 0;
+    for (const img of imgs) {
+      const src = img.getAttribute('src') || '';
+      if (src.startsWith('data:')) continue;
+      const file = pool[taken];
+      if (file) {
+        taken += 1;
+        try {
+          img.setAttribute('src', await readAsDataURL(file));
+          continue;
+        } catch { /* fall through to marking it unresolved */ }
+      }
+      img.setAttribute('data-unresolved', '1');
+      img.removeAttribute('src');
+      img.setAttribute('alt', 'Image could not be read from the clipboard');
+    }
+    // Images copied on their own arrive with no <img> tag to attach them to.
+    for (let i = taken; i < pool.length; i++) {
+      const img = doc.createElement('img');
+      img.setAttribute('src', await readAsDataURL(pool[i]));
+      doc.body.appendChild(img);
+    }
+    fragment = doc.body.innerHTML;
+  } else {
+    fragment = plain.split(/\n{2,}/).map(p =>
+      `<p>${p.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).replace(/\n/g, '<br>')}</p>`
+    ).join('');
+  }
+
+  document.execCommand('insertHTML', false, fragment);
+  updatePasteStats();
+});
+
+// Dropping image files onto the canvas fills gaps the clipboard couldn't carry.
+canvasEl.addEventListener('drop', async event => {
+  const images = [...(event.dataTransfer?.files || [])].filter(f => f.type.startsWith('image/'));
+  if (!images.length) return;
+  event.preventDefault();
+  event.stopPropagation();
+  for (const file of images) {
+    const img = document.createElement('img');
+    img.src = await readAsDataURL(file);
+    canvasEl.appendChild(img);
+  }
+  updatePasteStats();
+});
+
+canvasEl.addEventListener('input', updatePasteStats);
+
+function updatePasteStats() {
+  const text = (canvasEl.innerText || '').trim();
+  const good = canvasEl.querySelectorAll('img[src^="data:"]').length;
+  const bad = canvasEl.querySelectorAll('img[data-unresolved]').length;
+  const words = text ? text.split(/\s+/).length : 0;
+
+  pasteGo.disabled = !(words || good);
+  pasteStats.textContent = words || good
+    ? `${words} word${words === 1 ? '' : 's'} · ${good} image${good === 1 ? '' : 's'}`
+    : 'Nothing pasted yet.';
+
+  if (bad) {
+    pasteWarn.hidden = false;
+    pasteWarn.textContent =
+      `${bad} image${bad === 1 ? '' : 's'} didn't come through the clipboard. ` +
+      `Copy those on their own and paste again, or drag the image files onto this box.`;
+  } else {
+    pasteWarn.hidden = true;
+  }
+}
+
+document.getElementById('paste-clear').onclick = () => {
+  canvasEl.innerHTML = '';
+  updatePasteStats();
+};
+
+pasteGo.onclick = async () => {
+  const name = (pasteTitle.value || 'Pasted note').trim();
+  const row = rowFor(name, name);
+  const bad = canvasEl.querySelectorAll('img[data-unresolved]').length;
+  const payload = { name, html: canvasEl.innerHTML, unresolved: bad };
+
+  canvasEl.innerHTML = '';
+  updatePasteStats();
+  showTab('pdf');
+
+  try {
+    const engine = engineEl.value ? `&backend=${engineEl.value}` : '';
+    const res = await fetch(`/api/convert-paste?mode=ai${engine}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Conversion failed');
+    jobs.set(data.job_id, { row, name, done: false });
+    poll(data.job_id);
+  } catch (err) {
+    fail(row, err.message);
+  }
+};
+
+function refreshAll() {
+  const ready = [...jobs.entries()].filter(([, v]) => v.done).map(([k]) => k);
+  allBtn.style.display = ready.length > 1 ? 'inline-block' : 'none';
+  allBtn.onclick = () => { window.location = `/api/zip?ids=${ready.join(',')}`; };
+}
+</script>
+</body>
+</html>
