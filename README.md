@@ -1,30 +1,205 @@
 # PDF → Confluence-ready Word
 
-Drop PDFs on a page — or paste straight out of OneNote — and get `.docx` files
-that Confluence's Word importer accepts without mangling them.
+Drop a PDF on a web page — or paste straight out of OneNote — and download a
+`.docx` file that Confluence can import cleanly.
+
+## Start here
+
+You do not need to know Git, Python, or the command line. Follow the section for
+your computer **in order**. Copy only the text inside the code boxes.
+
+The app needs either **Codex** or **Claude Code** for its best-quality Accurate
+mode. Pick one; you do not need both. Codex is the default in these instructions.
+Neither option needs an API key.
+
+### Windows — first-time setup
+
+#### 1. Open PowerShell
+
+Click **Start**, type **PowerShell**, and press **Enter**. A blue or black window
+will open. Paste every Windows command below into that window and press **Enter**.
+
+#### 2. Install Python and Git
+
+Paste this whole box:
+
+```powershell
+winget install -e --id Python.Python.3.13
+winget install -e --id Git.Git
+```
+
+Wait for both installs to finish. If it asks you to accept an agreement, type
+`Y` and press **Enter**. Then close PowerShell and open it again.
+
+#### 3. Install Codex and sign in
+
+Paste this:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+```
+
+When it finishes, close PowerShell and open it again. Then paste:
+
+```powershell
+codex
+```
+
+Choose **Sign in with ChatGPT**. Your browser will open; sign in with the ChatGPT
+account that has Codex access. Return to PowerShell when it says you are signed
+in. Type `/exit` and press **Enter** to leave Codex.
+
+Already use Claude Code instead? Skip the Codex commands above and use these:
+
+```powershell
+irm https://claude.ai/install.ps1 | iex
+```
+
+Close and reopen PowerShell, run `claude`, and follow the browser login. Type
+`/exit` when the Claude Code prompt appears.
+
+#### 4. Download and start the app
+
+Paste this whole box:
+
+```powershell
+cd $HOME
+git clone https://github.com/windoze95/pdf2word.git
+cd pdf2word
+.\run.bat
+```
+
+The first start takes a few minutes because it installs the app's remaining
+pieces. Later starts are much faster.
+
+### Mac — first-time setup
+
+#### 1. Open Terminal
+
+Press **Command + Space**, type **Terminal**, and press **Return**. Paste every
+Mac command below into that window and press **Return**.
+
+#### 2. Check Python and Git
+
+Paste this:
 
 ```bash
+python3 --version
+git --version
+```
+
+Python must say `3.10` or newer. If Python is missing or older, install the
+current version from [Python for macOS](https://www.python.org/downloads/macos/),
+then close and reopen Terminal. If checking Git opens an Apple installation
+window, click **Install**, wait for it to finish, and run `git --version` again.
+
+#### 3. Install Codex and sign in
+
+Paste this:
+
+```bash
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+```
+
+When it finishes, close Terminal and open it again. Then paste:
+
+```bash
+codex
+```
+
+Choose **Sign in with ChatGPT**. Your browser will open; sign in with the ChatGPT
+account that has Codex access. Return to Terminal when it says you are signed
+in. Type `/exit` and press **Return** to leave Codex.
+
+Already use Claude Code instead? Skip the Codex commands above and use this:
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+Close and reopen Terminal, run `claude`, and follow the browser login. Type
+`/exit` when the Claude Code prompt appears.
+
+#### 4. Download and start the app
+
+Paste this whole box:
+
+```bash
+cd ~
+git clone https://github.com/windoze95/pdf2word.git
+cd pdf2word
 ./run.sh
 ```
 
-On Windows, double-click `run.bat` (or run it from a terminal).
+The first start takes a few minutes because it installs the app's remaining
+pieces. Later starts are much faster.
 
-That's it. The first run builds a virtualenv and installs dependencies; every
-run after starts in a second or two and opens the drop page in your browser.
-The only requirement is Python 3.10 or newer — everything else installs itself.
+Linux users can follow the Mac instructions after installing Python 3.10 or
+newer and Git with their normal package manager.
 
-## Giving it to your team
+The Codex and Claude Code install commands above come from their official
+[Codex CLI](https://learn.chatgpt.com/docs/codex/cli) and
+[Claude Code](https://code.claude.com/docs/en/quickstart) instructions.
 
-Send people the folder and this line:
+### The app should now open in your browser
 
-> **Install Python 3.10+, make sure you're signed in to Codex or Claude Code, then run `run.sh` (`run.bat` on Windows).**
+Keep the PowerShell or Terminal window open while you use the app.
 
-Nothing else — no API keys, no environment variables, no config file. Everyone
-runs their own copy: the app works by borrowing whichever CLI you're already
-logged into on that machine, so there is no shared instance to stand up and
-nothing to provision centrally. That is the trade for needing no keys. (Hosting
-one central instance for everybody would mean putting an API key on the server,
-which is the thing this design avoids.)
+If the browser does not open automatically, paste this into the browser's
+address bar:
+
+```text
+http://127.0.0.1:8756
+```
+
+If that address does not work, look in PowerShell or Terminal for the line that
+starts with **Open** and copy the address shown there. The final number may be
+`8757`, `8758`, or another nearby number if `8756` was already in use.
+
+To stop the app, return to PowerShell or Terminal and press **Ctrl + C**.
+
+### Every later time
+
+You do **not** need to install or clone anything again.
+
+On Windows, open PowerShell and paste:
+
+```powershell
+cd "$HOME\pdf2word"
+.\run.bat
+```
+
+On Mac or Linux, open Terminal and paste:
+
+```bash
+cd ~/pdf2word
+./run.sh
+```
+
+### Using the app
+
+1. Leave **Accurate** selected for the best result.
+2. Drag a PDF onto the page, or choose **Paste from OneNote** and paste a page.
+3. Start the conversion.
+4. Download the finished Word file.
+
+The app also saves every finished file in the `pdf2word/output` folder on your
+computer.
+
+### If something goes wrong
+
+| What you see | What to do |
+|---|---|
+| `winget` is not recognized | Install [Python for Windows](https://www.python.org/downloads/windows/) and [Git for Windows](https://git-scm.com/download/win) manually, then close and reopen PowerShell. |
+| `codex` or `claude` is not recognized | Close PowerShell or Terminal, open it again, and retry. If it still fails, repeat that tool's install step. |
+| `Python 3.10 or newer is required` | Install the current Python from [python.org](https://www.python.org/downloads/), then close and reopen PowerShell or Terminal. |
+| `destination path 'pdf2word' already exists` | The app is already downloaded. Use the commands under **Every later time** instead. |
+| The browser did not open | Copy the exact address after **Open** in PowerShell or Terminal and paste it into your browser. |
+| A window immediately closes on Windows | Open PowerShell and run the **Every later time** commands there so the error stays visible. |
+
+Nothing else is required: no API keys, environment variables, or config file.
+Everyone runs their own local copy, and the app uses the Codex or Claude Code
+login already stored on that computer.
 
 ## Why this exists
 
