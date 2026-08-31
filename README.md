@@ -8,9 +8,27 @@ Drop a PDF on a web page — or paste straight out of OneNote — and download a
 You do not need to know Git, Python, or the command line. Follow the section for
 your computer **in order**. Copy only the text inside the code boxes.
 
-The app needs either **Codex** or **Claude Code** for its best-quality Accurate
-mode. Pick one; you do not need both. Codex is the default in these instructions.
-Neither option needs an API key.
+> **Important: Codex or Claude Code is not where you use this app.** You sign in
+> to one of them once so this app can borrow its document-reading ability behind
+> the scenes. After setup, you use a separate page that opens in your web browser.
+> **Do not reopen ChatGPT, and do not paste your document into a chat.**
+
+What happens is:
+
+```text
+You put a PDF or OneNote page into this app's browser page
+                              ↓
+The app automatically asks Codex or Claude Code to understand the document
+                              ↓
+The app gives you a Word file to download
+```
+
+The saved Codex or Claude Code login is the only connection. The ChatGPT or
+Claude website is not part of the conversion workflow.
+
+Pick either **Codex** or **Claude Code** for that behind-the-scenes step; you do
+not need both. Codex is the default in these instructions. Neither option needs
+an API key.
 
 ### Windows — first-time setup
 
@@ -141,9 +159,23 @@ The Codex and Claude Code install commands above come from their official
 [Codex CLI](https://learn.chatgpt.com/docs/codex/cli) and
 [Claude Code](https://code.claude.com/docs/en/quickstart) instructions.
 
-### The app should now open in your browser
+### What happens after the last command
 
-Keep the PowerShell or Terminal window open while you use the app.
+After you run `run.bat` on Windows or `run.sh` on Mac, **stop typing commands**
+and wait. Keep the PowerShell or Terminal window open.
+
+A separate browser page should open with the title **PDF to Confluence-ready
+Word** and the words **Documents in. Clean Word out.** That browser page is the
+app. From this point on, work in the browser—not in PowerShell, Codex, Claude
+Code, or ChatGPT.
+
+On that browser page:
+
+1. Drag your PDF onto **Drop PDFs to convert**, or click **Paste from OneNote**.
+2. Leave **Accurate** selected.
+3. Start the conversion. The app contacts Codex or Claude Code automatically;
+   you will not see or use a chat window.
+4. Download the Word file when it finishes.
 
 If the browser does not open automatically, paste this into the browser's
 address bar:
@@ -176,12 +208,9 @@ cd ~/pdf2word
 ./run.sh
 ```
 
-### Using the app
-
-1. Leave **Accurate** selected for the best result.
-2. Drag a PDF onto the page, or choose **Paste from OneNote** and paste a page.
-3. Start the conversion.
-4. Download the finished Word file.
+Then stop typing and wait for the browser page to open. **Do not run Codex or
+Claude Code again, and do not open ChatGPT.** The saved login is used
+automatically behind the scenes.
 
 The app also saves every finished file in the `pdf2word/output` folder on your
 computer.
