@@ -7,6 +7,7 @@ No model calls, no network -- everything here is deterministic.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 import zipfile
@@ -239,9 +240,59 @@ def test_render() -> None:
         f"got {numbering.count('<w:num ')}",
     )
     check("bullet format defined", 'w:val="bullet"' in numbering)
+    # macOS Quick Look merges every num that shares an abstractNum into one
+    # running count, so each list must own its abstractNum outright.
+    abstract_per_num = re.findall(
+        r'<w:num [^>]*>.*?<w:abstractNumId w:val="(\d+)"/>', numbering, re.S
+    )
+    check(
+        "every list owns its own abstractNum",
+        len(abstract_per_num) == len(set(abstract_per_num)),
+        f"abstractNum ids per num: {abstract_per_num}",
+    )
 
     rels = docx_part(out, "word/_rels/document.xml.rels")
     check("hyperlink target is external", "example.com/portal" in rels)
+
+
+def test_nested_list_ids() -> None:
+    print("\nnested items stay in the parent's list")
+    from docx import Document
+
+    def item(list_id: str, level: int, ordered: bool = True) -> dict:
+        return {"type": "list_item", "list_id": list_id, "level": level,
+                "ordered": ordered, "runs": [{"text": f"{list_id}{level}"}]}
+
+    plan = {
+        "title": "",
+        "blocks": [
+            item("a", 0), item("b", 1), item("b", 1), item("a", 0), item("c", 1, ordered=False),
+            item("a", 0),
+            {"type": "heading", "level": 2, "runs": [{"text": "Next"}]},
+            item("d", 0), item("d", 1),
+        ],
+    }
+    doc = RawDoc(path="x.pdf", page_count=1, pages=[], metadata={}, workdir="")
+    out = os.path.join(tempfile.mkdtemp(), "nested.docx")
+    render.render(plan, doc, out)
+
+    nums = []
+    for paragraph in Document(out).paragraphs:
+        num_pr = paragraph._p.pPr.numPr if paragraph._p.pPr is not None else None
+        if num_pr is not None:
+            nums.append((paragraph.text, int(num_pr.numId.val), int(num_pr.ilvl.val)))
+    by_text = {}
+    for text, num_id, level in nums:
+        by_text.setdefault(text, set()).add(num_id)
+
+    a_num = by_text["a0"]
+    check("top-level items share one list", len(a_num) == 1)
+    check("stray-id sub-steps fold into the parent list", by_text["b1"] == a_num)
+    check("sub-steps keep their nesting level",
+          all(level == 1 for text, _, level in nums if text == "b1"))
+    check("nested bullets get their own bullet list", by_text["c1"] != a_num)
+    check("a list after a heading is a new list", by_text["d0"] != a_num)
+    check("its own sub-steps stay with it", by_text["d1"] == by_text["d0"])
 
 
 def test_image_placement() -> None:
@@ -285,6 +336,7 @@ def test_image_placement() -> None:
 if __name__ == "__main__":
     test_strict_schema()
     test_carry_list_join()
+    test_nested_list_ids()
     test_url_normalisation()
     test_paste_extraction()
     test_title_not_repeated()

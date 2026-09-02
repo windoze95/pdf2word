@@ -175,6 +175,8 @@ Lists
 - Give every distinct list its own `list_id`; numbering restarts per id. A list \
   interrupted by an image or a note paragraph and then resumed is still ONE \
   list -- keep the same id so the numbers continue.
+- Nested sub-items belong to the same list as the item they sit under: keep the \
+  parent's `list_id` and raise `level`. Never start a new `list_id` for sub-steps.
 
 Text formatting
 - Preserve bold, italic, and underline.

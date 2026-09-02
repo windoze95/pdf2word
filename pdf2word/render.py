@@ -104,17 +104,20 @@ def _set_letter_page(document: Document) -> None:
 # --------------------------------------------------------------------------
 
 class NumberingRegistry:
-    """Creates one Word numbering instance per logical list.
+    """Creates one Word numbering definition per logical list.
 
-    Word restarts numbering per `w:num`, so giving each list_id its own num is
-    what makes list 2 start at 1 again instead of continuing list 1.
+    Every list_id gets its own `w:abstractNum` *and* its own `w:num`. Word and
+    LibreOffice restart a list per `w:num` when it carries a startOverride, but
+    macOS Quick Look (the Finder preview) ignores that override and treats every
+    num that shares an abstractNum as one continuous list, and other importers
+    may do the same. With a shared abstractNum, a five-entry index made the
+    first body list start at 6. A private abstractNum per list leaves nothing
+    for a viewer to merge.
     """
 
     def __init__(self, document: Document):
         self._document = document
         self._numbering = self._numbering_element()
-        self._ordered_abstract: int | None = None
-        self._bullet_abstract: int | None = None
         self._by_list_id: dict[tuple[str, bool], int] = {}
 
     def _numbering_element(self):
@@ -179,25 +182,43 @@ class NumberingRegistry:
         if key in self._by_list_id:
             return self._by_list_id[key]
 
-        if ordered:
-            if self._ordered_abstract is None:
-                self._ordered_abstract = self._add_abstract(True)
-            abstract_id = self._ordered_abstract
-        else:
-            if self._bullet_abstract is None:
-                self._bullet_abstract = self._add_abstract(False)
-            abstract_id = self._bullet_abstract
-
+        abstract_id = self._add_abstract(ordered)
         num_id = self._next_id("w:num", "w:numId")
         element = parse_xml(
             f'<w:num {nsdecls("w")} w:numId="{num_id}">'
             f'<w:abstractNumId w:val="{abstract_id}"/>'
+            # Belt and braces for viewers that key on the num rather than the
+            # abstractNum: an explicit restart at 1.
             f'<w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride>'
             f"</w:num>"
         )
         self._numbering.append(element)
         self._by_list_id[key] = num_id
         return num_id
+
+
+def _nested_list_id(
+    list_id: str,
+    level: int,
+    previous: tuple[str, int] | None,
+    aliases: dict[str, str],
+) -> str:
+    """Keep a nested item in the list of the item directly above it.
+
+    Models sometimes hand sub-steps their own list_id. Word renders that
+    tolerably because each such list happens to start at "a.", but the
+    sub-steps are still a separate list: they no longer belong to the parent,
+    and viewers or importers that map each list to its own block show them as
+    a fresh top-level "1." An item at level > 0 that follows an item from a
+    different list is treated as nested in that list, and every later item
+    with the same id follows it there.
+    """
+    original = list_id
+    list_id = aliases.get(original, original)
+    if level > 0 and previous is not None and previous[0] != list_id:
+        aliases[original] = previous[0]
+        list_id = previous[0]
+    return list_id
 
 
 def _apply_numbering(paragraph, num_id: int, level: int) -> None:
@@ -433,10 +454,17 @@ def render(plan: dict[str, Any], doc: RawDoc, out_path: str) -> dict[str, Any]:
 
     blocks = _drop_repeated_title(plan.get("blocks") or [], title)
 
+    # (list_id, level) of the last list item, so a nested item that arrived
+    # with a stray list_id can be folded into the list above it. Headings and
+    # dividers end a list; images and note paragraphs do not.
+    previous_list: tuple[str, int] | None = None
+    list_aliases: dict[str, str] = {}
+
     for block in blocks:
         kind = block.get("type")
 
         if kind == "heading":
+            previous_list = None
             level = max(1, min(3, int(block.get("level") or 1)))
             paragraph = document.add_paragraph(style=f"Heading {level}")
             _write_runs(paragraph, block.get("runs"), has_link_style)
@@ -464,7 +492,11 @@ def render(plan: dict[str, Any], doc: RawDoc, out_path: str) -> dict[str, Any]:
             paragraph = document.add_paragraph()
             ordered = bool(block.get("ordered", True))
             level = max(0, min(4, int(block.get("level") or 0)))
-            num_id = numbering.num_id_for(str(block.get("list_id") or "default"), ordered)
+            list_id = _nested_list_id(
+                str(block.get("list_id") or "default"), level, previous_list, list_aliases
+            )
+            previous_list = (list_id, level)
+            num_id = numbering.num_id_for(list_id, ordered)
             if num_id is not None:
                 _apply_numbering(paragraph, num_id, level)
             else:
@@ -491,6 +523,7 @@ def render(plan: dict[str, Any], doc: RawDoc, out_path: str) -> dict[str, Any]:
                 stats["images"] += 1
 
         elif kind == "divider":
+            previous_list = None
             paragraph = document.add_paragraph()
             p_pr = paragraph._p.get_or_add_pPr()
             borders = OxmlElement("w:pBdr")
