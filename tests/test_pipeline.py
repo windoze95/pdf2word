@@ -333,6 +333,61 @@ def test_image_placement() -> None:
     )
 
 
+def test_list_survives_interruptions() -> None:
+    print("\nimages and notes between steps stay inside the step")
+    import re
+    from docx import Document
+    from PIL import Image
+
+    workdir = tempfile.mkdtemp()
+    png = os.path.join(workdir, "shot.png")
+    Image.new("RGB", (800, 400), "white").save(png)
+    candidate = ImageCandidate(
+        id="p01_i1", path=png, page=1, y=0, x0=0, x1=200,
+        width_pt=900, height_pt=450, is_background=False,
+    )
+
+    class FakeDoc(RawDoc):
+        def image_by_id(self, image_id):
+            return candidate if image_id == "p01_i1" else None
+
+    def step(text: str) -> dict:
+        return {"type": "list_item", "list_id": "steps", "level": 0, "ordered": True,
+                "runs": [{"text": text}]}
+
+    doc = FakeDoc(path="x.pdf", page_count=1, pages=[], metadata={}, workdir=workdir)
+    plan = {"title": "", "blocks": [
+        step("Click the funnel icon"),
+        {"type": "image", "image_id": "p01_i1", "alt": "funnel"},
+        step("Edit the filters"),
+        {"type": "paragraph", "runs": [{"text": "Note: a date is required."}]},
+        step("Save"),
+        {"type": "paragraph", "runs": [{"text": "Escalate if it still fails."}]},
+        {"type": "heading", "level": 2, "runs": [{"text": "Next"}]},
+    ]}
+    out = os.path.join(workdir, "steps.docx")
+    stats = render.render(plan, doc, out)
+
+    paragraphs = Document(out).paragraphs
+    positions = [i for i, p in enumerate(paragraphs)
+                 if p._p.pPr is not None and p._p.pPr.numPr is not None]
+    steps = [paragraphs[i] for i in positions]
+    check("three steps in one list", len(steps) == 3
+          and len({int(p._p.pPr.numPr.numId.val) for p in steps}) == 1)
+    check("no paragraph sits between the steps",
+          positions == list(range(positions[0], positions[0] + 3)), f"at {positions}")
+    check("screenshot lives inside the step before it",
+          stats["images"] == 1 and "<w:drawing" in steps[0]._p.xml)
+    check("note between steps lives inside the step before it", "Note: a date" in steps[1].text)
+    plain = [p for p in paragraphs if p.text.strip() and "numPr" not in p._p.xml
+             and not p.style.name.startswith("Heading")]
+    check("remark after the last step stays its own paragraph",
+          len(plain) == 1 and plain[0].text.startswith("Escalate"))
+    widths = [int(v) for v in re.findall(r'<wp:extent cx="(\d+)"', docx_xml(out))]
+    check("picture fits the step's text column (6.5in minus the 0.5in indent)",
+          widths and widths[0] <= (468 - 36) * 12700 + 5, f"got {widths}")
+
+
 if __name__ == "__main__":
     test_strict_schema()
     test_carry_list_join()
@@ -342,6 +397,7 @@ if __name__ == "__main__":
     test_title_not_repeated()
     test_render()
     test_image_placement()
+    test_list_survives_interruptions()
 
     print()
     if FAILURES:

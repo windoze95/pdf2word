@@ -221,6 +221,32 @@ def _nested_list_id(
     return list_id
 
 
+def _list_resumes(
+    blocks: list[dict[str, Any]],
+    index: int,
+    previous: tuple[str, int] | None,
+    aliases: dict[str, str],
+) -> bool:
+    """True when the next list item after blocks[index] continues the open list.
+
+    Only images and paragraphs may sit in between; a heading, table, or
+    divider ends the list. A nested item counts as continuing, because
+    _nested_list_id folds it into the open list.
+    """
+    if previous is None:
+        return False
+    for later in blocks[index + 1:]:
+        kind = later.get("type")
+        if kind in ("image", "paragraph"):
+            continue
+        if kind != "list_item":
+            return False
+        level = max(0, min(4, int(later.get("level") or 0)))
+        raw = str(later.get("list_id") or "default")
+        return aliases.get(raw, raw) == previous[0] or level > 0
+    return False
+
+
 def _apply_numbering(paragraph, num_id: int, level: int) -> None:
     p_pr = paragraph._p.get_or_add_pPr()
     num_pr = OxmlElement("w:numPr")
@@ -401,17 +427,42 @@ def _add_image(document: Document, path: str, width_pt: float, alt: str, indent:
 
     run = paragraph.add_run()
     try:
-        run.add_picture(path, width=Emu(int(min(width_pt, MAX_IMAGE_WIDTH_PT) * EMU_PER_POINT)))
+        shape = run.add_picture(path, width=Emu(int(min(width_pt, MAX_IMAGE_WIDTH_PT) * EMU_PER_POINT)))
     except Exception:
         paragraph._p.getparent().remove(paragraph._p)
         return False
-
-    if alt:
-        try:
-            document.inline_shapes[-1]._inline.docPr.set("descr", alt)
-        except Exception:
-            pass
+    _set_alt(shape, alt)
     return True
+
+
+def _append_image(paragraph, path: str, width_pt: float, alt: str, max_width_pt: float) -> bool:
+    """Add a picture on its own line at the end of an existing paragraph.
+
+    Used for a screenshot that belongs to a list item. In its own paragraph the
+    picture would sit between two items of the list, and while Word keeps
+    counting across that, Confluence's importer closes the list at any
+    paragraph that is not a list item and starts the next step at 1 again.
+    """
+    if not os.path.exists(path):
+        return False
+    run = paragraph.add_run()
+    run.add_break()
+    try:
+        shape = run.add_picture(path, width=Emu(int(min(width_pt, max_width_pt) * EMU_PER_POINT)))
+    except Exception:
+        run._r.getparent().remove(run._r)
+        return False
+    _set_alt(shape, alt)
+    return True
+
+
+def _set_alt(shape, alt: str) -> None:
+    if not alt:
+        return
+    try:
+        shape._inline.docPr.set("descr", alt)
+    except Exception:
+        pass
 
 
 # --------------------------------------------------------------------------
@@ -459,12 +510,20 @@ def render(plan: dict[str, Any], doc: RawDoc, out_path: str) -> dict[str, Any]:
     # dividers end a list; images and note paragraphs do not.
     previous_list: tuple[str, int] | None = None
     list_aliases: dict[str, str] = {}
+    # The paragraph and level of the last list item, while nothing but its own
+    # attachments have followed it. A screenshot after a step, or a note that
+    # sits between two steps of one list, goes into that paragraph after a
+    # line break instead of into a paragraph of its own. Word would keep
+    # counting across a separate paragraph, but Confluence's importer closes
+    # the list at any paragraph that is not a list item and restarts at 1.
+    open_item: tuple[Any, int] | None = None
 
-    for block in blocks:
+    for index, block in enumerate(blocks):
         kind = block.get("type")
 
         if kind == "heading":
             previous_list = None
+            open_item = None
             level = max(1, min(3, int(block.get("level") or 1)))
             paragraph = document.add_paragraph(style=f"Heading {level}")
             _write_runs(paragraph, block.get("runs"), has_link_style)
@@ -474,6 +533,13 @@ def render(plan: dict[str, Any], doc: RawDoc, out_path: str) -> dict[str, Any]:
             runs = block.get("runs") or []
             if not any((r.get("text") or "").strip() for r in runs):
                 continue
+            if open_item is not None and _list_resumes(blocks, index, previous_list, list_aliases):
+                paragraph = open_item[0]
+                paragraph.add_run().add_break()
+                _write_runs(paragraph, runs, has_link_style)
+                stats["paragraphs"] += 1
+                continue
+            open_item = None
             paragraph = document.add_paragraph()
             indent = int(block.get("indent") or 0)
             if indent:
@@ -503,8 +569,10 @@ def render(plan: dict[str, Any], doc: RawDoc, out_path: str) -> dict[str, Any]:
                 paragraph.style = document.styles["List Number" if ordered else "List Bullet"]
             _write_runs(paragraph, runs, has_link_style)
             stats["list_items"] += 1
+            open_item = (paragraph, level)
 
         elif kind == "table":
+            open_item = None
             _add_table(document, block.get("header") or [], block.get("rows") or [])
             stats["tables"] += 1
 
@@ -513,17 +581,26 @@ def render(plan: dict[str, Any], doc: RawDoc, out_path: str) -> dict[str, Any]:
             if not candidate:
                 continue
             width = float(block.get("width_pt") or candidate.width_pt or 300)
+            alt = str(block.get("alt") or "")
+            if open_item is not None:
+                paragraph, level = open_item
+                # Keep the picture inside the step's text column.
+                column = MAX_IMAGE_WIDTH_PT - LIST_INDENT_TWIPS * (level + 1) / 20
+                if _append_image(paragraph, candidate.path, width, alt, column):
+                    stats["images"] += 1
+                continue
             if _add_image(
                 document,
                 candidate.path,
                 width,
-                str(block.get("alt") or ""),
+                alt,
                 int(block.get("indent") or 0),
             ):
                 stats["images"] += 1
 
         elif kind == "divider":
             previous_list = None
+            open_item = None
             paragraph = document.add_paragraph()
             p_pr = paragraph._p.get_or_add_pPr()
             borders = OxmlElement("w:pBdr")

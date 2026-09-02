@@ -357,7 +357,10 @@ Every engine must accept images, since the converter looks at the rendered pages
 ## What comes out
 
 - Built-in `Heading 1/2/3` styles for real section structure
-- Numbered and bulleted lists with correct nesting, restarting per list
+- Numbered and bulleted lists with correct nesting, restarting per list. A
+  screenshot or note that falls between two steps stays inside the step above
+  it, so the count survives Confluence's import instead of restarting at 1
+  after every image
 - Genuine data tables only, with a repeating header row — never layout tables
 - Inline images at their original resolution, with alt text
 - Working hyperlinks pointing at the URLs the PDF actually linked to
